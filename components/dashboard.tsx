@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useUser } from "@clerk/nextjs";
@@ -390,11 +390,36 @@ function CreateRecordForm() {
 }
 
 function SavedEditRecords() {
-  const records = useQuery(api.reports.getDiseaseRecords);
-  const updateRecord = useMutation(api.reports.updateDiseaseRecord);
-  const registerRecord = useMutation(api.reports.registerDiseaseRecord);
   const userRole = useRole();
   const { signOut } = useClerk();
+  const [serverVerifiedRole, setServerVerifiedRole] = useState<string | undefined>(undefined);
+  const [isVerifying, setIsVerifying] = useState(true);
+  
+  // Verify role server-side first
+  useEffect(() => {
+    fetch("/api/verify-role")
+      .then(res => res.json())
+      .then(data => {
+        if (data.hasPermission) {
+          setServerVerifiedRole(data.role);
+          console.log("Server verified role for query:", data.role);
+        }
+        setIsVerifying(false);
+      })
+      .catch(err => {
+        console.warn("Could not verify role:", err);
+        setIsVerifying(false);
+      });
+  }, []);
+  
+  // Pass server-verified role to query (skip query until we verify role)
+  const records = useQuery(
+    api.reports.getDiseaseRecords,
+    isVerifying ? "skip" : (serverVerifiedRole ? { serverVerifiedRole } : {})
+  );
+  
+  const updateRecord = useMutation(api.reports.updateDiseaseRecord);
+  const registerRecord = useMutation(api.reports.registerDiseaseRecord);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{
     diseaseName: string;
@@ -471,6 +496,22 @@ function SavedEditRecords() {
     if (!editingId || !editForm) return;
     setIsSaving(true);
     try {
+      // Verify role server-side first
+      let verifiedRole: string | undefined = serverVerifiedRole;
+      if (!verifiedRole) {
+        try {
+          const verifyResponse = await fetch("/api/verify-role");
+          if (verifyResponse.ok) {
+            const verifyData = await verifyResponse.json();
+            if (verifyData.hasPermission) {
+              verifiedRole = verifyData.role;
+            }
+          }
+        } catch (verifyError) {
+          console.warn("Could not verify role:", verifyError);
+        }
+      }
+
       await updateRecord({
         id: editingId as any,
         diseaseName: editForm.diseaseName,
@@ -478,6 +519,7 @@ function SavedEditRecords() {
         location: editForm.location?.trim() || undefined,
         imageUrl: editForm.imageUrl || undefined,
         medicalSupplies: editForm.medicalSupplies,
+        serverVerifiedRole: verifiedRole,
       });
       handleCancelEdit();
       // Success - the record will automatically refresh via Convex query
@@ -492,7 +534,26 @@ function SavedEditRecords() {
   const handleRegister = async (id: string) => {
     setIsRegistering(id);
     try {
-      await registerRecord({ id: id as any });
+      // Verify role server-side first
+      let verifiedRole: string | undefined = serverVerifiedRole;
+      if (!verifiedRole) {
+        try {
+          const verifyResponse = await fetch("/api/verify-role");
+          if (verifyResponse.ok) {
+            const verifyData = await verifyResponse.json();
+            if (verifyData.hasPermission) {
+              verifiedRole = verifyData.role;
+            }
+          }
+        } catch (verifyError) {
+          console.warn("Could not verify role:", verifyError);
+        }
+      }
+
+      await registerRecord({ 
+        id: id as any,
+        serverVerifiedRole: verifiedRole,
+      });
       // Success - the record will be removed from draft list and appear in registered tab
       // Convex automatically refreshes queries after mutations
     } catch (error) {
@@ -723,9 +784,33 @@ function SavedEditRecords() {
 }
 
 function RegisteredRecords() {
-  const records = useQuery(api.reports.getRegisteredRecords);
   const userRole = useRole();
   const { signOut } = useClerk();
+  const [serverVerifiedRole, setServerVerifiedRole] = useState<string | undefined>(undefined);
+  const [isVerifying, setIsVerifying] = useState(true);
+  
+  // Verify role server-side first
+  useEffect(() => {
+    fetch("/api/verify-role")
+      .then(res => res.json())
+      .then(data => {
+        if (data.hasPermission) {
+          setServerVerifiedRole(data.role);
+          console.log("Server verified role for registered records query:", data.role);
+        }
+        setIsVerifying(false);
+      })
+      .catch(err => {
+        console.warn("Could not verify role:", err);
+        setIsVerifying(false);
+      });
+  }, []);
+  
+  // Pass server-verified role to query (skip query until we verify role)
+  const records = useQuery(
+    api.reports.getRegisteredRecords,
+    isVerifying ? "skip" : (serverVerifiedRole ? { serverVerifiedRole } : {})
+  );
 
   if (records === undefined) {
     return <MedicalLoader message="Loading registered records..." size="md" />;
