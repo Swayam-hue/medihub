@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: medihub
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter
+    region: oregon
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_CONVEX_URL
+        sync: false
+      - key: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_FRONTEND_API_URL
+        sync: false
+      - key: ASHA_INVITE_CODE
+        value: ASHA2025
+      - key: ADMIN_INVITE_CODE
+        value: ADMIN2025
+
