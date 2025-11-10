@@ -1,72 +1,85 @@
-// app/after-signin/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+// ✅ Disable static rendering completely
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+
+import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { MedicalPageLoader } from "@/components/ui/medical-loader";
 import { getApiUrl } from "@/lib/api-config";
 
-export default function AfterSignIn() {
+function AfterSignInInner() {
   const search = useSearchParams();
-  const roleFromUrl = search.get("role") || null;
-  const invite = search.get("invite") || undefined; // optional invite passed in URL
-  const { user, isSignedIn } = useUser();
   const router = useRouter();
+  const { user, isSignedIn, isLoaded } = useUser();
+
+  const roleFromUrl = search.get("role");
+  const invite = search.get("invite") ?? undefined;
+
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isSignedIn) return; // wait until Clerk session is ready
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      router.replace("/");
+      return;
+    }
 
-    (async () => {
+    const handleSignIn = async () => {
       try {
         const currentRole = (user?.publicMetadata?.role as string | undefined) || null;
 
-        // If no role assigned and a role was requested via URL, try to set it
         if (!currentRole && roleFromUrl && user?.id) {
           const res = await fetch(getApiUrl("/api/set-role"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ role: roleFromUrl, invite, userId: user.id }),
           });
+
           const json = await res.json();
-          if (!res.ok || !json.ok) {
-            setErr(json.error || "Failed to set role");
-            setLoading(false);
-            return;
-          }
+          if (!res.ok || !json.ok) throw new Error(json.error || "Failed to set role");
         }
 
-        // Wait a tiny bit for Clerk session to refresh (or force reload)
-        // Clerk session may not immediately reflect publicMetadata changes;
-        // a safe approach: reload to refresh session.
-        // If you prefer, you can call clerkClient on server to fetch, but reload is simple.
-        // Redirect to role dashboard:
-        const target =
+        const finalRole =
           (user?.publicMetadata?.role as string | undefined) ||
           roleFromUrl ||
           "citizen";
 
-        // Ensure the UI sees the new metadata: reload before redirect to pick up updates.
-        window.location.href = `/${target}`;
+        router.replace(`/${finalRole}`);
       } catch (e: any) {
-        setErr(e.message || "Unexpected error");
+        setErr(e.message || "Unexpected error occurred");
       } finally {
         setLoading(false);
       }
-    })();
-  }, [isSignedIn, user, roleFromUrl, invite, router]);
+    };
+
+    handleSignIn();
+  }, [isLoaded, isSignedIn, user, roleFromUrl, invite, router]);
 
   if (loading) return <MedicalPageLoader message="Signing you in & assigning role…" />;
-  if (err) return (
-    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-red-50 to-white">
-      <div className="text-center space-y-4 p-8">
-        <div className="text-6xl">⚠️</div>
-        <h2 className="text-2xl font-semibold text-red-600">Error</h2>
-        <p className="text-gray-700">{err}</p>
+
+  if (err)
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-red-50 to-white">
+        <div className="text-center space-y-4 p-8">
+          <div className="text-6xl">⚠️</div>
+          <h2 className="text-2xl font-semibold text-red-600">Error</h2>
+          <p className="text-gray-700">{err}</p>
+        </div>
       </div>
-    </div>
-  );
+    );
+
   return <MedicalPageLoader message="Done — redirecting…" />;
+}
+
+export default function AfterSignIn() {
+  // ✅ Wrap with Suspense to support useSearchParams
+  return (
+    <Suspense fallback={<MedicalPageLoader message="Loading sign-in state..." />}>
+      <AfterSignInInner />
+    </Suspense>
+  );
 }
